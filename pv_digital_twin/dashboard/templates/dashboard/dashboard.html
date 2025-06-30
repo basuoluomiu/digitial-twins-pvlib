@@ -1,0 +1,802 @@
+{% extends 'base.html' %} {% block title %}<span id="page-title">系统仪表盘</span> - <span id="platform-title">光伏数字孪生平台</span>{% endblock %} {% block content %}
+<div class="container-fluid">
+  <div class="row mb-4">
+    <div class="col-md-12">
+      <h2 class="text-center" id="dashboard-header">系统仪表盘</h2>
+      <div class="text-end">
+        <div class="badge {% if simulation_mode == '真实仿真系统' %}bg-success{% else %}bg-secondary{% endif %} mb-2">
+          <span id="simulation-mode-text">{{ simulation_mode }}</span> ({{ adapter_type }})
+        </div>
+        <button id="toggle-mode-btn" class="btn {% if simulation_mode == '真实仿真系统' %}btn-outline-secondary{% else %}btn-outline-success{% endif %} btn-sm me-2">
+          <i class="bi bi-arrow-repeat"></i> <span id="toggle-mode-text">切换至{% if simulation_mode == '真实仿真系统' %}模拟{% else %}真实{% endif %}系统</span>
+        </button>
+        <button id="refresh-simulation" class="btn btn-primary btn-sm">
+          <i class="bi bi-arrow-clockwise"></i> <span id="refresh-text">重置仿真</span>
+        </button>
+        <button id="pause-simulation" class="btn btn-warning btn-sm">
+          <i class="bi bi-pause-fill"></i> <span id="pause-text">暂停仿真</span>
+        </button>
+        <div id="refresh-feedback" class="mt-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-md-4">
+      <div class="card mb-4">
+        <div class="card-header" id="system-overview">系统概况</div>
+        <div class="card-body">
+          <h4><span id="installed-capacity-label">总装机容量</span>: {{ installed_capacity }} kW</h4>
+          <h4>
+            <span id="max-power-label">当日最高功率</span>:
+            <span id="current-power">{{ max_power_today|floatformat:1 }}</span> kW
+          </h4>
+          <h4>
+            <span id="max-ghi-label">当日最高辐照度</span>:
+            <span id="max-ghi-today">{{ max_ghi_today|floatformat:0 }}</span> W/m²
+          </h4>
+          <h4>
+            <span id="max-efficiency-label">当日最高效率</span>:
+            <span id="max-efficiency-today">{{ max_efficiency_today|floatformat:1 }}</span> %
+          </h4>
+          <h4>
+            <span id="daily-energy-label">今日累计发电量</span>:
+            <span id="daily-energy">{{ daily_energy|floatformat:2 }}</span> kWh
+          </h4>
+          <h4>
+            <span id="ambient-temp-label">当前环境温度</span>:
+            <span id="current-temp-air">{{ current_temp_air|floatformat:1 }}</span>
+            °C
+          </h4>
+          <h4>
+            <span id="module-temp-label">当前组件温度</span>:
+            <span id="current-temp-cell">{{ current_temp_cell|floatformat:1 }}</span>
+            °C
+          </h4>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-8">
+      <div class="card">
+        <div class="card-header" id="power-output">系统输出功率</div>
+        <div class="card-body">
+          <div id="power-chart" style="height: 300px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mt-4">
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header" id="environmental-conditions">环境条件</div>
+        <div class="card-body">
+          <div id="env-chart" style="height: 300px"></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header" id="daily-energy-header">每日发电量</div>
+        <div class="card-body">
+          <div id="daily-energy-chart" style="height: 300px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mt-4 mb-5">
+    <div class="col-md-12">
+      <div class="card">
+        <div class="card-header" id="performance-analysis">系统性能分析</div>
+        <div class="card-body">
+          <div id="performance-chart" style="height: 400px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script>
+  // 定义全局变量
+  let powerChart, envChart, dailyEnergyChart, performanceChart;
+  let updateTimer;
+  let isSimulationPaused = false;
+  let currentLang = 'zh'; // 默认语言
+
+  // 多语言翻译对象
+  const translations = {
+    'zh': {
+      'page-title': '系统仪表盘',
+      'platform-title': '光伏数字孪生平台',
+      'dashboard-header': '系统仪表盘',
+      'simulation-mode-text': '模拟仿真系统',
+      'toggle-mode-text': '切换至真实系统',
+      'refresh-text': '重置仿真',
+      'pause-text': '暂停仿真',
+      'resume-text': '继续仿真',
+      'system-overview': '系统概况',
+      'installed-capacity-label': '总装机容量',
+      'max-power-label': '当日最高功率',
+      'max-ghi-label': '当日最高辐照度',
+      'max-efficiency-label': '当日最高效率',
+      'daily-energy-label': '今日累计发电量',
+      'ambient-temp-label': '当前环境温度',
+      'module-temp-label': '当前组件温度',
+      'power-output': '系统输出功率',
+      'environmental-conditions': '环境条件',
+      'daily-energy-header': '每日发电量',
+      'performance-analysis': '系统性能分析',
+      'power-title': '系统功率输出',
+      'power-ac': 'AC功率',
+      'power-dc': 'DC功率',
+      'env-title': '环境条件',
+      'irradiance': '辐照度',
+      'temp-air': '环境温度',
+      'temp-cell': '组件温度',
+      'daily-energy-title': '每日发电量 (kWh)',
+      'energy-label': '发电量',
+      'performance-title': '系统性能分析',
+      'efficiency': '系统效率',
+      'power-ratio': '功率比'
+    },
+    'en': {
+      'page-title': 'System Dashboard',
+      'platform-title': 'PV Digital Twin Platform',
+      'dashboard-header': 'System Dashboard',
+      'simulation-mode-text': 'Simulated System',
+      'toggle-mode-text': 'Switch to Real System',
+      'refresh-text': 'Reset Simulation',
+      'pause-text': 'Pause Simulation',
+      'resume-text': 'Resume Simulation',
+      'system-overview': 'System Overview',
+      'installed-capacity-label': 'Total Capacity',
+      'max-power-label': 'Today\'s Max Power',
+      'max-ghi-label': 'Today\'s Max Irradiance',
+      'max-efficiency-label': 'Today\'s Max Efficiency',
+      'daily-energy-label': 'Today\'s Energy Generation',
+      'ambient-temp-label': 'Current Ambient Temp',
+      'module-temp-label': 'Current Module Temp',
+      'power-output': 'System Power Output',
+      'environmental-conditions': 'Environmental Conditions',
+      'daily-energy-header': 'Daily Energy Generation',
+      'performance-analysis': 'System Performance Analysis',
+      'power-title': 'System Power Output',
+      'power-ac': 'AC Power',
+      'power-dc': 'DC Power',
+      'env-title': 'Environmental Conditions',
+      'irradiance': 'Irradiance',
+      'temp-air': 'Ambient Temperature',
+      'temp-cell': 'Module Temperature',
+      'daily-energy-title': 'Daily Energy Output (kWh)',
+      'energy-label': 'Energy',
+      'performance-title': 'System Performance Analysis',
+      'efficiency': 'System Efficiency',
+      'power-ratio': 'Power Ratio'
+    }
+  };
+
+  // 更新图表标题和标签的语言
+  function updateChartLanguage(lang) {
+    if (powerChart) {
+      powerChart.setOption({
+        title: {
+          text: translations[lang]['power-title'],
+        },
+        legend: {
+          data: [translations[lang]['power-ac'], translations[lang]['power-dc']],
+        },
+        series: [
+          {
+            name: translations[lang]['power-ac'],
+          },
+          {
+            name: translations[lang]['power-dc'],
+          },
+        ]
+      });
+    }
+    
+    if (envChart) {
+      envChart.setOption({
+        title: {
+          text: translations[lang]['env-title'],
+        },
+        legend: {
+          data: [
+            translations[lang]['irradiance'],
+            translations[lang]['temp-air'],
+            translations[lang]['temp-cell']
+          ],
+        },
+        series: [
+          {
+            name: translations[lang]['irradiance'],
+          },
+          {
+            name: translations[lang]['temp-air'],
+          },
+          {
+            name: translations[lang]['temp-cell'],
+          },
+        ]
+      });
+    }
+    
+    if (dailyEnergyChart) {
+      dailyEnergyChart.setOption({
+        title: {
+          text: translations[lang]['daily-energy-title'],
+        },
+        yAxis: {
+          name: lang === 'zh' ? "发电量 (kWh)" : "Energy (kWh)",
+        },
+        series: [
+          {
+            name: translations[lang]['energy-label'],
+          }
+        ]
+      });
+    }
+    
+    if (performanceChart) {
+      performanceChart.setOption({
+        title: {
+          text: translations[lang]['performance-title'],
+        },
+        legend: {
+          data: [
+            translations[lang]['efficiency'],
+            translations[lang]['power-ratio']
+          ],
+        },
+        series: [
+          {
+            name: translations[lang]['efficiency'],
+          },
+          {
+            name: translations[lang]['power-ratio'],
+          }
+        ]
+      });
+    }
+  }
+
+  // 加载每日发电量数据
+  function loadDailyEnergyData() {
+    fetch("/api/daily-energy/")
+      .then((response) => response.json())
+      .then((data) => {
+        if (dailyEnergyChart) {
+          dailyEnergyChart.setOption({
+            xAxis: {
+              data: data.map((item) => item.date),
+            },
+            series: [
+              {
+                data: data.map((item) => item.energy_kwh),
+              },
+            ],
+          });
+        } else {
+          dailyEnergyChart = echarts.init(
+            document.getElementById("daily-energy-chart")
+          );
+          dailyEnergyChart.setOption({
+            title: {
+              text: translations[currentLang]['daily-energy-title'],
+            },
+            tooltip: {
+              trigger: "axis",
+              axisPointer: { type: "shadow" },
+            },
+            xAxis: {
+              type: "category",
+              data: data.map((item) => item.date),
+            },
+            yAxis: {
+              type: "value",
+              name: currentLang === 'zh' ? "发电量 (kWh)" : "Energy (kWh)",
+            },
+            series: [
+              {
+                name: translations[currentLang]['energy-label'],
+                type: "bar",
+                data: data.map((item) => item.energy_kwh),
+                itemStyle: {
+                  color: "#5470C6",
+                },
+              },
+            ],
+          });
+        }
+      })
+      .catch((error) =>
+        console.error("Error loading daily energy data:", error)
+      );
+  }
+
+  // 加载仿真数据
+  function loadSimulationData() {
+    fetch("/api/simulation-data/")
+      .then((response) => response.json())
+      .then((data) => {
+        // 更新功率图表
+        if (powerChart) {
+          powerChart.setOption({
+            xAxis: {
+              data: data.timestamps,
+            },
+            series: [
+              {
+                name: "AC功率",
+                data: data.ac_power.map((p) => p / 1000), // 转换为kW
+              },
+              {
+                name: "DC功率",
+                data: data.dc_power.map((p) => p / 1000), // 转换为kW
+              },
+            ],
+          });
+        } else {
+          // 初始化功率图表
+          powerChart = echarts.init(document.getElementById("power-chart"));
+          powerChart.setOption({
+            title: {
+              text: translations[currentLang]['power-title'],
+            },
+            tooltip: {
+              trigger: "axis",
+            },
+            legend: {
+              data: [translations[currentLang]['power-ac'], translations[currentLang]['power-dc']],
+            },
+            xAxis: {
+              type: "category",
+              data: data.timestamps,
+            },
+            yAxis: {
+              type: "value",
+              name: "kW",
+            },
+            series: [
+              {
+                name: translations[currentLang]['power-ac'],
+                type: "line",
+                data: data.ac_power.map((p) => p / 1000),
+                smooth: true,
+              },
+              {
+                name: translations[currentLang]['power-dc'],
+                type: "line",
+                data: data.dc_power.map((p) => p / 1000),
+                smooth: true,
+              },
+            ],
+          });
+        }
+
+        // 更新环境图表
+        if (envChart) {
+          envChart.setOption({
+            xAxis: {
+              data: data.timestamps,
+            },
+            series: [
+              {
+                name: "环境温度",
+                data: data.temp_air,
+              },
+              {
+                name: "组件温度",
+                data: data.temp_cell,
+              },
+              {
+                name: "辐照度",
+                data: data.ghi,
+              },
+            ],
+          });
+        } else {
+          // 初始化环境图表
+          envChart = echarts.init(document.getElementById("env-chart"));
+          envChart.setOption({
+            title: {
+              text: translations[currentLang]['env-title'],
+            },
+            tooltip: {
+              trigger: "axis",
+              axisPointer: {
+                type: "cross",
+              },
+            },
+            legend: {
+              data: [translations[currentLang]['irradiance'], translations[currentLang]['temp-air'], translations[currentLang]['temp-cell']],
+            },
+            xAxis: {
+              type: "category",
+              data: data.timestamps,
+            },
+            yAxis: [
+              {
+                type: "value",
+                name: "温度 (°C)",
+                position: "left",
+              },
+              {
+                type: "value",
+                name: "辐照度 (W/m²)",
+                position: "right",
+              },
+            ],
+            series: [
+              {
+                name: translations[currentLang]['irradiance'],
+                type: "line",
+                yAxisIndex: 0,
+                data: data.ghi,
+                smooth: true,
+              },
+              {
+                name: translations[currentLang]['temp-air'],
+                type: "line",
+                yAxisIndex: 0,
+                data: data.temp_air,
+                smooth: true,
+              },
+              {
+                name: translations[currentLang]['temp-cell'],
+                type: "line",
+                yAxisIndex: 0,
+                data: data.temp_cell,
+                smooth: true,
+              },
+            ],
+          });
+        }
+
+        // 更新性能图表
+        if (performanceChart) {
+          performanceChart.setOption({
+            xAxis: {
+              data: data.timestamps,
+            },
+            series: [
+              {
+                name: "系统效率",
+                data: data.efficiency, // 使用后端提供的效率数据
+                connectNulls: true, // 连接空值点，使曲线不中断
+              },
+            ],
+          });
+        } else {
+          // 初始化性能图表
+          performanceChart = echarts.init(
+            document.getElementById("performance-chart")
+          );
+          performanceChart.setOption({
+            title: {
+              text: translations[currentLang]['performance-title'],
+            },
+            tooltip: {
+              trigger: "axis",
+              formatter: function (params) {
+                const param = params[0];
+                if (param.value === null || param.value === undefined) {
+                  return `${param.name}<br/>系统效率: 无数据`;
+                }
+                return `${param.name}<br/>系统效率: ${param.value.toFixed(2)}%`;
+              },
+            },
+            legend: {
+              data: ["系统效率"],
+            },
+            xAxis: {
+              type: "category",
+              data: data.timestamps ? data.timestamps : [],
+            },
+            yAxis: {
+              type: "value",
+              name: "效率 (%)",
+              min: 0,
+              max: 100,
+            },
+            series: [
+              {
+                name: "系统效率",
+                type: "line",
+                data: data.efficiency ? data.efficiency : [], // 使用后端提供的效率数据
+                smooth: true,
+                connectNulls: true, // 恢复为true，连接所有点(包括效率为0的点)
+                lineStyle: {
+                  width: 2,
+                },
+                itemStyle: {
+                  color: "#91CC75",
+                },
+                // 不显示数据点标记
+                showSymbol: false,
+              },
+            ],
+          });
+        }
+
+        // 更新系统概况数据
+        if (data.timestamps.length > 0) {
+          const lastIndex = data.timestamps.length - 1;
+          // 计算当日最高功率
+          let maxPower = 0;
+          if (data.ac_power && data.ac_power.length > 0) {
+            maxPower = Math.max(...data.ac_power) / 1000;
+          }
+          document.getElementById("current-power").textContent = maxPower.toFixed(1);
+          
+          // 计算当日最高辐照度
+          let maxGHI = 0;
+          if (data.ghi && data.ghi.length > 0) {
+            maxGHI = Math.max(...data.ghi);
+          }
+          document.getElementById("max-ghi-today").textContent = maxGHI.toFixed(0);
+          
+          // 计算当日最高系统效率
+          let maxEfficiency = 0;
+          if (data.efficiency && data.efficiency.length > 0) {
+            // 过滤掉零值或无效值
+            const validEfficiencies = data.efficiency.filter(eff => eff > 0);
+            if (validEfficiencies.length > 0) {
+              maxEfficiency = Math.max(...validEfficiencies);
+            }
+          }
+          document.getElementById("max-efficiency-today").textContent = maxEfficiency.toFixed(1);
+          
+          document.getElementById("current-temp-air").textContent =
+            data.temp_air[lastIndex].toFixed(1);
+          document.getElementById("current-temp-cell").textContent =
+            data.temp_cell[lastIndex].toFixed(1);
+        }
+      })
+      .catch((error) => console.error("加载仿真数据失败:", error));
+  }
+
+  // 更新仿真状态
+  function updateSimulationStatus() {
+    fetch("/api/simulation-status/")
+      .then((response) => response.json())
+      .then((data) => {
+        isSimulationPaused = data.is_paused;
+        const pauseBtn = document.getElementById("pause-simulation");
+        const pauseText = document.getElementById("pause-text");
+
+        if (isSimulationPaused) {
+          pauseBtn.classList.remove("btn-warning");
+          pauseBtn.classList.add("btn-success");
+          pauseText.textContent = translations[currentLang]['resume-text'];
+          pauseBtn.querySelector("i").classList.remove("bi-pause-fill");
+          pauseBtn.querySelector("i").classList.add("bi-play-fill");
+        } else {
+          pauseBtn.classList.remove("btn-success");
+          pauseBtn.classList.add("btn-warning");
+          pauseText.textContent = translations[currentLang]['pause-text'];
+          pauseBtn.querySelector("i").classList.remove("bi-play-fill");
+          pauseBtn.querySelector("i").classList.add("bi-pause-fill");
+        }
+      })
+      .catch((error) => console.error("获取仿真状态失败:", error));
+  }
+
+  // 监听语言变化事件
+  $(document).on('languageChanged', function(event, lang) {
+    currentLang = lang;
+    
+    // 更新页面元素文本
+    for (const [id, text] of Object.entries(translations[lang])) {
+      $('#' + id).text(text);
+    }
+    
+    // 特殊处理暂停/继续按钮
+    const pauseText = isSimulationPaused ? translations[lang]['resume-text'] : translations[lang]['pause-text'];
+    $('#pause-text').text(pauseText);
+    
+    // 更新图表语言
+    updateChartLanguage(lang);
+  });
+
+  // 启动实时数据更新
+  function startRealTimeUpdates() {
+    // 立即更新一次
+    loadSimulationData();
+    loadDailyEnergyData();
+    updateSimulationStatus();
+
+    // 设置定时更新
+    updateTimer = setInterval(() => {
+      loadSimulationData();
+      loadDailyEnergyData();
+    }, 5000); // 每5秒更新一次
+  }
+
+  // 停止实时数据更新
+  function stopRealTimeUpdates() {
+    if (updateTimer) {
+      clearInterval(updateTimer);
+      updateTimer = null;
+    }
+  }
+
+  // 页面加载完成后加载数据
+  $(document).ready(function () {
+    // 从localStorage加载语言设置
+    currentLang = localStorage.getItem('prefLanguage') || 'zh';
+    
+    // 初始加载数据
+    startRealTimeUpdates();
+
+    // 窗口大小变化时重新调整图表大小
+    window.addEventListener("resize", function () {
+      if (powerChart) powerChart.resize();
+      if (envChart) envChart.resize();
+      if (dailyEnergyChart) dailyEnergyChart.resize();
+      if (performanceChart) performanceChart.resize();
+    });
+
+    // 重置仿真按钮功能
+    const refreshBtn = document.getElementById("refresh-simulation");
+    const refreshFeedback = document.getElementById("refresh-feedback");
+
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", function () {
+        // 显示加载中状态
+        refreshFeedback.innerHTML =
+          '<div class="alert alert-info">正在重置仿真，请稍候...</div>';
+
+        // 获取CSRF令牌
+        const csrftoken = getCookie("csrftoken");
+
+        // 发送重置请求
+        fetch("/api/reset-simulation/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": csrftoken,
+          },
+          body: JSON.stringify({}),
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.status === "success") {
+              refreshFeedback.innerHTML = `<div class="alert alert-success">${data.message}</div>`;
+              // 重新加载数据
+              loadSimulationData();
+              loadDailyEnergyData();
+
+              // 2秒后隐藏消息
+              setTimeout(() => {
+                refreshFeedback.innerHTML = "";
+              }, 2000);
+            } else {
+              refreshFeedback.innerHTML = `<div class="alert alert-danger">重置失败: ${data.message}</div>`;
+            }
+          })
+          .catch((error) => {
+            refreshFeedback.innerHTML = `<div class="alert alert-danger">发生错误: ${error}</div>`;
+          });
+      });
+    }
+
+    // 暂停/继续仿真按钮功能
+    const pauseBtn = document.getElementById("pause-simulation");
+
+    if (pauseBtn) {
+      pauseBtn.addEventListener("click", function () {
+        // 获取CSRF令牌
+        const csrftoken = getCookie("csrftoken");
+
+        // 根据当前状态发送暂停或继续请求
+        const endpoint = isSimulationPaused
+          ? "/api/resume-simulation/"
+          : "/api/pause-simulation/";
+
+        fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": csrftoken,
+          },
+          body: JSON.stringify({}),
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.status === "success") {
+              // 更新按钮状态
+              updateSimulationStatus();
+
+              // 显示操作反馈
+              refreshFeedback.innerHTML = `<div class="alert alert-success">${data.message}</div>`;
+
+              // 2秒后隐藏消息
+              setTimeout(() => {
+                refreshFeedback.innerHTML = "";
+              }, 2000);
+            } else {
+              refreshFeedback.innerHTML = `<div class="alert alert-info">${data.message}</div>`;
+
+              // 2秒后隐藏消息
+              setTimeout(() => {
+                refreshFeedback.innerHTML = "";
+              }, 2000);
+            }
+          })
+          .catch((error) => {
+            refreshFeedback.innerHTML = `<div class="alert alert-danger">发生错误: ${error}</div>`;
+          });
+      });
+    }
+
+    // 获取CSRF Token的辅助函数
+    function getCookie(name) {
+      let cookieValue = null;
+      if (document.cookie && document.cookie !== "") {
+        const cookies = document.cookie.split(";");
+        for (let i = 0; i < cookies.length; i++) {
+          const cookie = cookies[i].trim();
+          if (cookie.substring(0, name.length + 1) === name + "=") {
+            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+            break;
+          }
+        }
+      }
+      return cookieValue;
+    }
+
+    // 切换仿真模式按钮功能
+    const toggleModeBtn = document.getElementById("toggle-mode-btn");
+
+    if (toggleModeBtn) {
+      toggleModeBtn.addEventListener("click", function () {
+        // 禁用按钮，防止重复点击
+        toggleModeBtn.disabled = true;
+        toggleModeBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> 正在切换...';
+
+        // 发送切换模式请求
+        fetch("/dashboard/toggle-mode/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+          },
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.success) {
+              // 显示成功消息
+              document.getElementById("refresh-feedback").innerHTML = 
+                `<div class="alert alert-success">${data.message}，页面将在3秒后刷新...</div>`;
+              
+              // 3秒后刷新页面
+              setTimeout(() => {
+                window.location.reload();
+              }, 3000);
+            } else {
+              // 启用按钮
+              toggleModeBtn.disabled = false;
+              toggleModeBtn.innerHTML = '<i class="bi bi-arrow-repeat"></i> 重试切换';
+              
+              // 显示错误消息
+              document.getElementById("refresh-feedback").innerHTML = 
+                `<div class="alert alert-danger">切换失败：${data.message}</div>`;
+            }
+          })
+          .catch((error) => {
+            // 启用按钮
+            toggleModeBtn.disabled = false;
+            toggleModeBtn.innerHTML = '<i class="bi bi-arrow-repeat"></i> 重试切换';
+            
+            // 显示错误消息
+            document.getElementById("refresh-feedback").innerHTML = 
+              `<div class="alert alert-danger">发生错误: ${error}</div>`;
+          });
+      });
+    }
+  });
+</script>
+{% endblock %}

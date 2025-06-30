@@ -1,0 +1,34 @@
+# Python 缓存文件
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+venv/
+.env/
+.venv/
+
+# 编辑器配置
+.vscode/
+.idea/
+.cursor/
+
+# 数据文件（如有大数据或中间结果，建议忽略）
+data/
+
+# 日志文件
+*.log
+
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints/
+
+# macOS 系统文件
+.DS_Store
+
+# Windows 系统文件
+Thumbs.db
+.augmentignore
